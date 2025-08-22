@@ -1,0 +1,13 @@
+apiVersion: seca.eu.crossplane.io/v1
+kind: XStorages
+metadata:
+  name: ubuntu-storage
+spec: {
+  sizeGB: 10,
+  sku: "Standard_LRS",
+  tenant: "public",
+  image: "ubuntu:latest",
+  workspace: "example-workspace",
+  region: "de-fra",
+  name: "my-storage",
+}

@@ -1,0 +1,13 @@
+apiVersion: apiextensions.crossplane.io/v1
+kind: Composition
+metadata:
+  name: function-ionossecastorage
+spec:
+  compositeTypeRef:
+    apiVersion: seca.eu.crossplane.io/v1
+    kind: XStorages
+  mode: Pipeline
+  pipeline:
+  - step: run-the-template
+    functionRef:
+      name: function-ionossecastorage
