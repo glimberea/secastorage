@@ -2,12 +2,14 @@ package main
 
 import (
 	"context"
+	"strings"
 
 	v1 "github.com/crossplane/crossplane-runtime/apis/common/v1"
 	"github.com/crossplane/function-sdk-go/resource"
 	"github.com/crossplane/function-sdk-go/resource/composed"
 	"github.com/ionos-cloud/provider-upjet-ionoscloud/apis/compute/v1alpha1"
 	"github.com/ionos-cloud/sdk-go-bundle/shared"
+	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 
 	"github.com/crossplane/function-sdk-go/logging"
@@ -27,8 +29,19 @@ type Function struct {
 // RunFunction runs the Function.
 func (f *Function) RunFunction(_ context.Context, req *fnv1.RunFunctionRequest) (*fnv1.RunFunctionResponse, error) {
 	f.log.Info("Running function", "tag", req.GetMeta().GetTag())
-
 	rsp := response.To(req, response.DefaultTTL)
+
+	observed, err := request.GetObservedComposedResources(req)
+	if err != nil {
+		return nil, errors.Wrapf(err, "cannot get observed composed resources from %T", req)
+	}
+
+	desired, err := request.GetDesiredComposedResources(req)
+	if err != nil {
+		response.Fatal(rsp, errors.Wrapf(err, "cannot get desired resources from %T", req))
+		return rsp, nil
+	}
+
 	xr, err := request.GetObservedCompositeResource(req)
 	if err != nil {
 		response.Fatal(rsp, errors.Wrapf(err, "cannot get observed composite resource from %T", req))
@@ -71,11 +84,7 @@ func (f *Function) RunFunction(_ context.Context, req *fnv1.RunFunctionRequest) 
 		response.Fatal(rsp, errors.Wrapf(err, "cannot read spec.name field of %s", xr.Resource.GetKind()))
 		return rsp, nil
 	}
-	desired, err := request.GetDesiredComposedResources(req)
-	if err != nil {
-		response.Fatal(rsp, errors.Wrapf(err, "cannot get desired resources from %T", req))
-		return rsp, nil
-	}
+
 	// todo - check if datacenter already exists. If it does, get it's ID and use it when creating the volume.
 	datacenterName := workspace + "-datacenter"
 	f.log.Info("Creating datacenter", "generatedName", datacenterName)
@@ -93,7 +102,7 @@ func (f *Function) RunFunction(_ context.Context, req *fnv1.RunFunctionRequest) 
 		Spec: v1alpha1.DatacenterSpec{
 			ForProvider: v1alpha1.DatacenterParameters{
 				Description: shared.ToPtr("Datacenter for " + workspace),
-				Location:    shared.ToPtr(region),
+				Location:    shared.ToPtr(strings.Replace(region, "-", "/", 1)),
 				Name:        shared.ToPtr(datacenterName),
 			},
 		},
@@ -103,11 +112,20 @@ func (f *Function) RunFunction(_ context.Context, req *fnv1.RunFunctionRequest) 
 		response.Fatal(rsp, errors.Wrapf(err, "cannot convert %T to %T", datacenter, &composed.Unstructured{}))
 		return rsp, nil
 	}
-	desired[resource.Name("xservers-"+datacenterName)] = &resource.DesiredComposed{Resource: cd}
+
+	desiredDatacenter := &resource.DesiredComposed{Resource: cd}
+	if observedDatacenter, exists := observed[resource.Name("xservers-"+datacenterName)]; exists && observedDatacenter.Resource != nil {
+		if observedDatacenter.Resource.GetCondition(v1.TypeReady).Status == corev1.ConditionTrue {
+			f.log.Info("Datacenter is ready", "name", datacenterName)
+			desiredDatacenter.Ready = resource.ReadyTrue
+		}
+	}
+	desired[resource.Name("xservers-"+datacenterName)] = desiredDatacenter
+
 	f.log.Info("Creating volume", "name", workspace+"_volume")
 	vol := v1alpha1.Volume{
 		ObjectMeta: metav1.ObjectMeta{
-			Name: workspace + "_volume",
+			Name: workspace + "-volume",
 		},
 		Spec: v1alpha1.VolumeSpec{
 			ForProvider: v1alpha1.VolumeParameters_2{
@@ -134,7 +152,16 @@ func (f *Function) RunFunction(_ context.Context, req *fnv1.RunFunctionRequest) 
 		response.Fatal(rsp, errors.Wrapf(err, "cannot convert %T to %T", vol, &composed.Unstructured{}))
 		return rsp, nil
 	}
-	desired[resource.Name("xservers-"+name)] = &resource.DesiredComposed{Resource: cd}
+
+	desiredVolume := &resource.DesiredComposed{Resource: cd}
+	if observedVolume, exists := observed[resource.Name("xservers-"+name)]; exists && observedVolume.Resource != nil {
+		if observedVolume.Resource.GetCondition(v1.TypeReady).Status == corev1.ConditionTrue {
+			f.log.Info("Volume is ready", "name", name)
+			desiredVolume.Ready = resource.ReadyTrue
+		}
+	}
+
+	desired[resource.Name("xservers-"+name)] = desiredVolume
 
 	if err := response.SetDesiredComposedResources(rsp, desired); err != nil {
 		response.Fatal(rsp, errors.Wrapf(err, "cannot set desired composed resources in %T", rsp))

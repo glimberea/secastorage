@@ -1,10 +1,10 @@
 apiVersion: apiextensions.crossplane.io/v1
 kind: CompositeResourceDefinition
 metadata:
-  name: xrs.seca.eu.crossplane.io
+  name: xstorages.seca.eu.crossplane.io
 spec:
   group: seca.eu.crossplane.io
-  scope: Namespaced
+  scope: Cluster
   names:
     kind: XStorages
     plural: xstorages
